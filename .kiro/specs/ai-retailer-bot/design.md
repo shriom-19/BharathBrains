@@ -6,6 +6,15 @@ The AI Retailer Bot is a sophisticated single-page application that combines nat
 
 The architecture follows a modular design with clear separation between the user interface, natural language processing, retailer integration, and recommendation systems. This enables independent scaling and maintenance of each component while ensuring fast response times and reliable performance.
 
+**Key Design Decisions:**
+- **Single-Page Application Architecture**: Chosen for seamless user experience and real-time updates during multi-retailer searches
+- **Parallel Search Strategy**: All retailers searched simultaneously to minimize total response time (target: 5-10 seconds, with first results within 5 seconds per Requirement 10.2)
+- **Progressive Loading**: Results displayed as they become available to improve perceived performance
+- **Location-First Approach**: Pincode validation required before search to ensure accurate delivery information and compliance with Indian postal code format
+- **AI-Powered Explanations**: Every recommendation includes human-readable explanations for transparency and evaluator understanding
+- **Voice-First Capability**: Optional voice input and output for hands-free shopping experience
+- **Feedback-Driven Learning**: User feedback integration for continuous recommendation improvement
+
 ## Architecture
 
 ### High-Level Architecture
@@ -16,6 +25,8 @@ graph TB
         UI[React SPA Interface]
         Voice[Web Speech API]
         State[Redux State Management]
+        Filters[Advanced Filter System]
+        Feedback[User Feedback Interface]
     end
     
     subgraph "Application Layer"
@@ -23,6 +34,7 @@ graph TB
         Search[Cross-Retailer Engine]
         Rec[Recommendation Engine]
         Cache[Response Cache]
+        Learn[Feedback Learning System]
     end
     
     subgraph "Integration Layer"
@@ -40,6 +52,8 @@ graph TB
     UI --> NLP
     UI --> Search
     UI --> Voice
+    UI --> Filters
+    UI --> Feedback
     Voice --> NLP
     NLP --> OpenAI
     Search --> Amazon
@@ -49,6 +63,8 @@ graph TB
     Search --> Pincode
     Search --> Rec
     Rec --> Cache
+    Feedback --> Learn
+    Learn --> Rec
     State --> UI
 ```
 
@@ -58,26 +74,43 @@ graph TB
 - Chosen for its mature ecosystem, excellent performance with virtual DOM, and strong TypeScript support
 - Provides component reusability and efficient state management
 - Large community support and extensive documentation
+- **Design Rationale**: React's component-based architecture aligns perfectly with the modular UI requirements (search interface, results display, voice controls)
 
 **State Management**: Redux Toolkit
-- Centralized state management for complex application state
-- Predictable state updates and time-travel debugging
-- Excellent DevTools integration
+- Centralized state management for complex application state including search results, filters, and user feedback
+- Predictable state updates and time-travel debugging capabilities
+- Excellent DevTools integration for development and debugging
+- **Design Rationale**: Complex state interactions between search, filters, voice input, and cross-retailer insights require centralized management
 
 **Styling**: Tailwind CSS
-- Utility-first approach for rapid UI development
-- Consistent design system and responsive design capabilities
-- Small bundle size with purging unused styles
+- Utility-first approach for rapid UI development and consistent design system
+- Responsive design capabilities essential for mobile and desktop compatibility
+- Small bundle size with purging unused styles for optimal performance
+- **Design Rationale**: Hackathon timeline requires rapid UI development while maintaining professional appearance
 
 **Voice Integration**: Web Speech API
 - Native browser support for speech recognition and synthesis
-- No external dependencies required
-- Real-time speech-to-text conversion
+- No external dependencies required, reducing complexity and cost
+- Real-time speech-to-text conversion with good accuracy
+- Text-to-speech for result summaries and comparative insights
+- **Design Rationale**: Native API provides reliable voice functionality without additional service dependencies, enabling hands-free shopping experience as specified in Requirement 3
 
 **Backend Services**: Node.js with Express
-- JavaScript ecosystem consistency
-- Excellent performance for I/O-intensive operations
+- JavaScript ecosystem consistency between frontend and backend
+- Excellent performance for I/O-intensive operations (parallel retailer searches)
 - Rich package ecosystem for web scraping and API integration
+- **Design Rationale**: JavaScript consistency reduces context switching and enables code sharing between frontend and backend
+
+**AI Integration**: OpenAI GPT-4 API
+- Advanced natural language understanding for intent parsing
+- Structured output capabilities for consistent entity extraction
+- Explanation generation for recommendation transparency
+- **Design Rationale**: GPT-4 provides the most reliable natural language processing for complex product queries
+
+**Web Scraping**: Puppeteer + Cheerio
+- Puppeteer for dynamic content (Amazon, complex JavaScript sites)
+- Cheerio for static HTML parsing (faster for simple sites)
+- **Design Rationale**: Hybrid approach balances performance with capability across different retailer architectures
 
 ## Components and Interfaces
 
@@ -89,6 +122,9 @@ interface SearchInterfaceProps {
   onSearch: (query: ProductQuery) => void;
   isLoading: boolean;
   voiceEnabled: boolean;
+  onVoiceToggle: () => void;
+  filters: ProductFilters;
+  onFiltersChange: (filters: ProductFilters) => void;
 }
 
 interface ProductQuery {
@@ -97,21 +133,26 @@ interface ProductQuery {
   budget?: PriceRange;
   filters?: ProductFilters;
   confidence: number;
+  sessionId: string;
 }
 ```
 
 **Responsibilities:**
-- Render natural language input field with live preview
-- Handle voice input integration
-- Display intent parsing results with confidence scores
-- Manage advanced filters in collapsible interface
-- Validate pincode input format
+- Render natural language input field with live preview and example queries (e.g., "Running shoes under ₹3000 for daily jogging")
+- Handle voice input integration with visual indicators (🎤 listening, ⏳ processing)
+- Display intent parsing results with confidence scores and disambiguation options
+- Manage advanced filters in collapsible interface with session persistence
+- Validate pincode input format (6-digit Indian postal codes) before allowing search
+- Provide clear visual hierarchy and professional appearance for evaluator understanding
+- **Design Decision**: Combined text and voice input in single component for seamless user experience, with mandatory pincode validation per Requirements 2.1 and 2.2
 
 #### IntentPreview Component
 ```typescript
 interface IntentPreviewProps {
   parsedIntent: ParsedIntent;
   confidence: number;
+  onIntentModification: (intent: ParsedIntent) => void;
+  disambiguationOptions?: DisambiguationOption[];
 }
 
 interface ParsedIntent {
@@ -120,34 +161,113 @@ interface ParsedIntent {
   features: string[];
   brand?: string;
   specifications?: Record<string, string>;
+  isComplete: boolean;
+  missingFields?: string[];
+}
+
+interface DisambiguationOption {
+  term: string;
+  options: string[];
+  selected?: string;
 }
 ```
 
 **Responsibilities:**
-- Display extracted product information in real-time
-- Show confidence indicators for parsing accuracy
-- Allow users to modify detected intent
-- Provide visual feedback for parsing quality
+- Display extracted product information in real-time as user types
+- Show confidence indicators for parsing accuracy with color-coded feedback
+- Allow users to modify detected intent through interactive elements
+- Provide visual feedback for parsing quality and completeness
+- Handle disambiguation for ambiguous terms (e.g., "Apple" → "Apple fruit" vs "Apple iPhone")
+- Request clarification for incomplete information with specific prompts
+- **Design Decision**: Real-time preview builds user confidence and allows immediate correction of misinterpretations
 
-#### CrossRetailerInsights Component
+#### UserFeedbackInterface Component
+```typescript
+interface UserFeedbackInterfaceProps {
+  productId: string;
+  onFeedback: (productId: string, feedback: FeedbackType) => void;
+  feedbackStatus?: FeedbackStatus;
+}
+
+interface FeedbackType {
+  type: 'relevant' | 'not_relevant';
+  timestamp: Date;
+  queryId: string;
+}
+
+interface FeedbackStatus {
+  submitted: boolean;
+  confirmed: boolean;
+}
+```
+
+**Responsibilities:**
+- Display thumbs up (👍 Relevant) and thumbs down (👎 Not Relevant) feedback options for each recommendation
+- Provide visual confirmation when feedback is recorded
+- Store feedback data for recommendation algorithm improvement
+- Handle feedback submission with proper error handling and retry mechanisms
+- **Design Decision**: Simple binary feedback system for hackathon demonstration while providing foundation for machine learning improvements per Requirements 9.1, 9.3, and 9.5
+
+#### AdvancedFilters Component
+```typescript
+interface AdvancedFiltersProps {
+  filters: ProductFilters;
+  onFiltersChange: (filters: ProductFilters) => void;
+  isCollapsed: boolean;
+  onToggleCollapse: () => void;
+  conflictResolution?: FilterConflictResolution;
+}
+
+interface ProductFilters {
+  priceRange?: PriceRange;
+  brands?: string[];
+  size?: string;
+  color?: string;
+  specifications?: Record<string, string>;
+}
+
+interface FilterConflictResolution {
+  hasConflict: boolean;
+  conflictType: 'price' | 'brand' | 'specification';
+  suggestedResolution: string;
+}
+```
+
+**Responsibilities:**
+- Provide collapsible advanced filters for brand, price range, size, color, and specifications
+- Preserve filter state during user session for consistent experience
+- Handle filter conflicts with natural language input by prioritizing explicit selections
+- Suggest filter relaxation when no results match applied criteria
+- Update results across all retailers simultaneously when filters are applied
+- **Design Decision**: Collapsible interface reduces visual clutter while providing power users with detailed control, with explicit conflict resolution per Requirements 4.1, 4.2, 4.4, and 4.5
 ```typescript
 interface CrossRetailerInsightsProps {
   insights: RetailerInsights;
   isLoading: boolean;
+  onInsightClick: (insight: InsightType) => void;
 }
 
 interface RetailerInsights {
-  bestPrice: { retailer: string; price: number; product: Product };
+  bestPrice: { retailer: string; price: number; product: Product; savings?: number };
   fastestDelivery: { retailer: string; eta: string; product: Product };
   mostOptions: { retailer: string; count: number };
+  lastUpdated: Date;
+}
+
+interface InsightType {
+  type: 'best_price' | 'fastest_delivery' | 'most_options';
+  retailer: string;
 }
 ```
 
 **Responsibilities:**
-- Display comparative insights across retailers
-- Highlight best deals and delivery options
-- Update insights in real-time as results load
-- Provide quick navigation to specific retailer results
+- Display comparative insights across retailers in prominent panel with Best Price, Fastest Delivery, and Most Options sections
+- Highlight best deals, delivery options, and product variety with clear visual indicators
+- Update insights in real-time as results load from different retailers
+- Provide quick navigation to specific retailer results when insights are clicked
+- Show savings calculations and delivery time comparisons for informed decision making
+- Count and display which retailer has the most product options
+- **Design Decision**: Prominent insights panel provides immediate value comparison without requiring users to analyze individual results, addressing Requirements 6.1, 6.2, 6.3, 6.4, and 6.5
 
 #### RetailerResults Component
 ```typescript
@@ -156,6 +276,7 @@ interface RetailerResultsProps {
   products: Product[];
   status: SearchStatus;
   onFeedback: (productId: string, feedback: FeedbackType) => void;
+  organizationMode: 'tabs' | 'unified';
 }
 
 interface Product {
@@ -168,15 +289,27 @@ interface Product {
   explanation: string;
   highlights: ProductHighlight[];
   retailerUrl: string;
+  rating: number;
+  reviewCount: number;
+}
+
+interface SearchStatus {
+  state: 'loading' | 'success' | 'error' | 'not_deliverable';
+  message?: string;
+  progress?: number;
 }
 ```
 
 **Responsibilities:**
-- Display products in card layout with progressive loading
-- Show match scores and AI explanations
-- Handle user feedback collection
-- Manage product highlighting and labels
-- Provide direct links to retailer pages
+- Display products in card layout with progressive loading and clear status indicators
+- Show match scores as percentages or ratings and AI explanations for each recommendation
+- Handle user feedback collection with thumbs up/down options
+- Manage product highlighting and labels ("Top Pick", "Best Value", "Fastest Delivery")
+- Provide direct links to retailer pages with "Buy" and "View Details" buttons
+- Organize results in tab-based navigation with one tab per retailer
+- Display real-time status indicators for each retailer (⏳ Searching, ✅ Results Available, ❌ Not Deliverable)
+- Maintain responsive design for both desktop and mobile devices
+- **Design Decision**: Tab-based organization provides clear retailer separation while progressive loading improves perceived performance, addressing Requirements 5.2, 5.5, 7.2, 7.4, 8.1, 8.2, 8.3, 8.4, and 8.5
 
 ### Backend Services
 
@@ -186,6 +319,8 @@ interface IntentParserService {
   parseQuery(query: string): Promise<ParsedIntent>;
   extractEntities(text: string): Promise<EntityExtractionResult>;
   calculateConfidence(intent: ParsedIntent): number;
+  handleDisambiguation(ambiguousTerms: string[]): Promise<DisambiguationOptions>;
+  validateCompleteness(intent: ParsedIntent): ValidationResult;
 }
 
 interface EntityExtractionResult {
@@ -194,14 +329,34 @@ interface EntityExtractionResult {
   brand: string | null;
   features: string[];
   specifications: Record<string, string>;
+  confidence: number;
+  ambiguousTerms?: string[];
+}
+
+interface DisambiguationOptions {
+  term: string;
+  options: Array<{
+    value: string;
+    description: string;
+    confidence: number;
+  }>;
+}
+
+interface ValidationResult {
+  isComplete: boolean;
+  missingFields: string[];
+  clarificationPrompts: string[];
 }
 ```
 
 **Implementation Approach:**
-- Utilize OpenAI GPT-4 API for natural language understanding
-- Implement prompt engineering for consistent entity extraction
-- Use structured output formatting for reliable parsing
-- Cache common query patterns for improved performance
+- Utilize OpenAI GPT-4 API for natural language understanding with structured output formatting
+- Implement prompt engineering for consistent entity extraction and confidence scoring
+- Handle ambiguous terms by providing disambiguation options (e.g., "Apple" → "Apple fruit" vs "Apple iPhone")
+- Request clarification for incomplete information with specific prompts for missing details
+- Cache common query patterns for improved performance and reduced API costs
+- Support example queries like "Running shoes under ₹3000 for daily jogging" as specified in Requirement 1.5
+- **Design Decision**: GPT-4 provides the most reliable NLP for complex product queries while structured output ensures consistent parsing, addressing Requirements 1.1, 1.2, 1.3, and 1.4
 
 #### Cross-Retailer Engine
 ```typescript
@@ -209,6 +364,8 @@ interface CrossRetailerEngine {
   searchAllRetailers(query: ProductQuery): Promise<RetailerSearchResults>;
   searchRetailer(retailer: RetailerName, query: ProductQuery): Promise<Product[]>;
   validateDelivery(pincode: string, retailer: RetailerName): Promise<boolean>;
+  getSearchStatus(searchId: string): SearchStatusUpdate;
+  handleRetailerFailure(retailer: RetailerName, error: Error): void;
 }
 
 interface RetailerSearchResults {
@@ -216,20 +373,34 @@ interface RetailerSearchResults {
   flipkart: SearchResult;
   myntra: SearchResult;
   meesho: SearchResult;
+  searchId: string;
+  startTime: Date;
 }
 
 interface SearchResult {
   status: 'loading' | 'success' | 'error' | 'not_deliverable';
   products: Product[];
   error?: string;
+  responseTime?: number;
+  lastUpdated: Date;
+}
+
+interface SearchStatusUpdate {
+  retailer: RetailerName;
+  status: 'loading' | 'success' | 'error' | 'not_deliverable';
+  progress: number;
+  message: string;
 }
 ```
 
 **Implementation Strategy:**
-- Parallel execution of retailer searches using Promise.all()
-- Individual error handling to prevent cascade failures
-- Timeout management for responsive user experience
-- Rate limiting and retry logic for API stability
+- Parallel execution of retailer searches using Promise.all() to minimize total response time
+- Individual error handling to prevent cascade failures when one retailer fails
+- Timeout management for responsive user experience (complete within 10 seconds, first results within 5 seconds)
+- Rate limiting and retry logic for API stability and compliance
+- Real-time status tracking with progress indicators for each retailer
+- Delivery zone validation for each retailer to ensure accurate availability information
+- **Design Decision**: Parallel search architecture ensures fast response times while individual error handling maintains system reliability, addressing Requirements 5.1, 5.2, 5.3, 5.4, and 10.2
 
 #### Recommendation Engine
 ```typescript
@@ -238,19 +409,72 @@ interface RecommendationEngine {
   generateExplanation(product: Product, query: ProductQuery): string;
   rankProducts(products: Product[], query: ProductQuery): Product[];
   assignHighlights(products: Product[]): Product[];
+  incorporateFeedback(feedback: UserFeedback[]): void;
+  adjustRankingAlgorithm(feedbackData: FeedbackAnalysis): void;
 }
 
 interface ProductHighlight {
   type: 'top_pick' | 'best_value' | 'fastest_delivery';
   reason: string;
+  confidence: number;
+}
+
+interface UserFeedback {
+  productId: string;
+  type: 'relevant' | 'not_relevant';
+  timestamp: Date;
+  queryId: string;
+  matchScore: number;
+}
+
+interface FeedbackAnalysis {
+  patterns: FeedbackPattern[];
+  adjustments: AlgorithmAdjustment[];
+  confidence: number;
 }
 ```
 
 **Scoring Algorithm:**
 - Weighted scoring based on price match, feature alignment, and delivery speed
-- Machine learning-inspired approach using feature vectors
-- User feedback integration for continuous improvement
-- Explanation generation using template-based natural language generation
+- Machine learning-inspired approach using feature vectors and user feedback integration
+- Match score calculation as percentages for clear user understanding
+- Explanation generation using template-based natural language generation with format: "Recommended because [specific reasons]"
+- Continuous improvement through user feedback integration for future similar queries
+- Negative feedback analysis to reduce similar recommendations and improve accuracy
+- **Design Decision**: Transparent scoring with human-readable explanations builds user trust while feedback integration enables continuous improvement, addressing Requirements 7.1, 7.2, 7.3, 7.5, 9.2, and 9.4
+
+#### Voice Interface Service
+```typescript
+interface VoiceInterfaceService {
+  startListening(): Promise<void>;
+  stopListening(): void;
+  convertSpeechToText(audioStream: MediaStream): Promise<string>;
+  convertTextToSpeech(text: string): Promise<void>;
+  generateResultSummary(insights: RetailerInsights): string;
+  handleVoiceError(error: SpeechRecognitionError): void;
+}
+
+interface SpeechRecognitionError {
+  type: 'no-speech' | 'audio-capture' | 'not-allowed' | 'network' | 'aborted';
+  message: string;
+  recoverable: boolean;
+}
+
+interface VoiceResultSummary {
+  text: string;
+  keyInsights: string[];
+  comparisonHighlights: string[];
+}
+```
+
+**Implementation Approach:**
+- Utilize Web Speech API for native browser speech recognition and synthesis
+- Handle microphone permissions with clear user guidance and fallback options
+- Generate spoken summaries highlighting key comparative insights like "Amazon delivers fastest, but Flipkart has the cheapest option"
+- Provide visual indicators for voice operation states (listening, processing, speaking)
+- Implement error handling for common voice interface issues (no speech detected, permission denied)
+- Ensure voice input produces equivalent results to text input through consistent parsing
+- **Design Decision**: Native Web Speech API reduces dependencies while providing reliable voice functionality for hands-free shopping experience, addressing Requirements 3.1, 3.2, 3.3, 3.4, and 3.5
 
 ### Retailer Integration Adapters
 
@@ -341,6 +565,7 @@ interface SearchSession {
   queries: UserQuery[];
   results: SearchResult[];
   feedback: UserFeedback[];
+  filters: ProductFilters;
   startTime: Date;
   lastActivity: Date;
 }
@@ -350,6 +575,8 @@ interface UserFeedback {
   type: 'relevant' | 'not_relevant';
   timestamp: Date;
   queryId: string;
+  matchScore: number;
+  explanation?: string;
 }
 ```
 
@@ -361,14 +588,15 @@ interface UserFeedback {
 - Indexed by retailer and search query hash
 
 **Sessions Collection:**
-- User session tracking for feedback correlation
-- Indexed by session ID and timestamp
-- Used for recommendation algorithm improvement
+- User session tracking for feedback correlation and filter persistence
+- Indexed by session ID and timestamp for efficient retrieval
+- Used for recommendation algorithm improvement and user experience continuity
 
 **Feedback Collection:**
-- User feedback storage for machine learning
-- Aggregated data for recommendation tuning
-- Privacy-compliant anonymous storage
+- User feedback storage for machine learning and algorithm adjustment
+- Aggregated data for recommendation tuning and pattern analysis
+- Privacy-compliant anonymous storage with performance metrics
+- Feedback analysis for reducing similar recommendations when negative feedback is received
 
 ## Error Handling
 
@@ -397,14 +625,17 @@ interface VoiceErrorHandler {
   handleSpeechRecognitionError(error: SpeechRecognitionError): void;
   handleNoSpeechDetected(): void;
   provideFallbackInput(): void;
+  handleBrowserCompatibility(): void;
 }
 ```
 
 **Voice-Specific Error Management:**
-- Clear permission request flows
-- Visual feedback for microphone status
-- Automatic fallback to text input
-- Browser compatibility detection
+- Clear permission request flows with user guidance
+- Visual feedback for microphone status and voice operation states
+- Automatic fallback to text input when voice recognition fails
+- Browser compatibility detection with graceful degradation
+- Error recovery suggestions for common voice interface issues
+- **Design Decision**: Comprehensive voice error handling ensures accessibility while maintaining user experience quality, addressing Requirements 3.5 and 10.5
 
 ### Backend Error Resilience
 
@@ -419,10 +650,12 @@ interface RetailerErrorHandler {
 ```
 
 **Resilience Patterns:**
-- Circuit breaker pattern for failing retailers
-- Exponential backoff for rate-limited requests
-- Fallback to cached data when APIs fail
-- Health check monitoring for retailer services
+- Circuit breaker pattern for failing retailers to prevent cascade failures
+- Exponential backoff for rate-limited requests with automatic retry scheduling
+- Fallback to cached data when APIs fail or are temporarily unavailable
+- Health check monitoring for retailer services with automatic recovery
+- Individual retailer timeout handling without affecting other searches
+- **Design Decision**: Comprehensive resilience patterns ensure system reliability even when individual retailers fail, addressing Requirements 5.4, 10.3, 10.4, and 11.3
 
 #### Data Validation and Sanitization
 ```typescript
@@ -435,10 +668,12 @@ interface DataValidator {
 ```
 
 **Data Quality Assurance:**
-- Input sanitization to prevent injection attacks
-- Product data validation before storage
-- Price normalization across different formats
-- Image URL validation and fallback handling
+- Input sanitization to prevent injection attacks and malformed queries
+- Product data validation before storage with schema enforcement
+- Price normalization across different formats and currencies
+- Image URL validation and fallback handling with placeholder images
+- Data freshness management with automatic refresh for outdated information
+- **Design Decision**: Comprehensive data validation ensures accurate product information while security measures protect against malicious input, addressing Requirements 11.2, 11.4, 11.5, and 10.5
 
 ## Testing Strategy
 
@@ -659,16 +894,21 @@ Based on the prework analysis of acceptance criteria, the following properties h
 ### Performance and Scalability
 
 **Response Time Management:**
+- Application loads within 3 seconds for optimal user experience per Requirement 10.1
+- First search results returned within 5 seconds of query submission per Requirement 10.2
+- Complete search results within 10 seconds across all retailers per Requirement 5.3
 - Parallel retailer search execution to minimize total response time
 - Progressive result loading to show partial results as they become available
 - Caching strategies for frequently searched products and queries
-- Database query optimization for session and feedback data
 
 **Resource Management:**
 - Memory usage optimization for large product result sets
 - Connection pooling for retailer API integrations
 - Garbage collection optimization for long-running search sessions
 - CPU usage monitoring for AI processing operations
+- Graceful degradation under high system load while maintaining core functionality per Requirement 10.3
+- Concurrent user support without performance degradation per Requirement 10.4
+- **Design Decision**: Comprehensive resource management ensures system reliability and performance under varying load conditions while maintaining user experience quality
 
 ## Testing Strategy
 
@@ -677,17 +917,22 @@ Based on the prework analysis of acceptance criteria, the following properties h
 The AI Retailer Bot requires a dual testing strategy combining traditional unit testing with property-based testing to ensure both specific functionality and universal correctness properties.
 
 **Unit Testing Focus Areas:**
-- **Specific Examples**: Test concrete scenarios like the example query "Running shoes under ₹3000 for daily jogging"
+- **Specific Examples**: Test concrete scenarios like the example query "Running shoes under ₹3000 for daily jogging" per Requirement 1.5
 - **Edge Cases**: Test boundary conditions such as maximum price ranges, empty search results, and invalid pincodes
-- **Error Conditions**: Test specific error scenarios like network failures, invalid API responses, and malformed user input
+- **Error Conditions**: Test specific error scenarios like network failures, invalid API responses, and malformed user input with user-friendly error messages per Requirement 10.5
 - **Integration Points**: Test component interactions, API integrations, and data flow between services
-- **UI Component Behavior**: Test React component rendering, user interactions, and state management
+- **UI Component Behavior**: Test React component rendering, user interactions, and state management with responsive design per Requirement 8.5
+- **Voice Interface Testing**: Test speech recognition, text-to-speech, and voice error handling per Requirements 3.1-3.5
+- **Feedback System Testing**: Test thumbs up/down feedback collection and algorithm adjustment per Requirements 9.1-9.5
 
 **Property-Based Testing Focus Areas:**
 - **Universal Properties**: Test properties that should hold for all valid inputs across the entire input space
-- **Data Consistency**: Verify that data transformations maintain consistency across different retailers and formats
-- **Business Logic Correctness**: Test that recommendation algorithms and scoring functions behave correctly for all input combinations
+- **Data Consistency**: Verify that data transformations maintain consistency across different retailers and formats per Requirement 11.2
+- **Business Logic Correctness**: Test that recommendation algorithms and scoring functions behave correctly for all input combinations per Requirements 7.1-7.5
 - **System Invariants**: Verify that system state remains consistent regardless of user interaction patterns
+- **Cross-Retailer Consistency**: Test that parallel searches maintain data integrity and proper error isolation per Requirements 5.1-5.4
+- **Filter Application**: Test that filter combinations work correctly across all retailers and handle conflicts appropriately per Requirements 4.1-4.5
+- **Voice Input Equivalence**: Test that voice input produces equivalent results to text input across all scenarios per Requirements 3.1-3.2
 
 ### Property-Based Testing Configuration
 

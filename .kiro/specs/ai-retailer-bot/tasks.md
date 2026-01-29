@@ -6,7 +6,7 @@ This implementation plan breaks down the AI Retailer Bot development into discre
 
 ## Tasks
 
-- [-] 1. Project Setup and Core Infrastructure
+- [ ] 1. Project Setup and Core Infrastructure
   - Initialize React TypeScript project with Vite for fast development
   - Set up Node.js Express backend with TypeScript configuration
   - Configure ESLint, Prettier, and testing frameworks (Jest, React Testing Library, fast-check)
